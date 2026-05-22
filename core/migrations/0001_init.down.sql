@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS analysis_outputs;
+DROP TABLE IF EXISTS analyses;
+DROP TABLE IF EXISTS band_assets;
+DROP TABLE IF EXISTS captures;
+DROP TABLE IF EXISTS flights;
+DROP TABLE IF EXISTS datasets;
+

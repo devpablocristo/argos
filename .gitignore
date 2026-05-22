@@ -1,0 +1,18 @@
+.DS_Store
+var/
+*.log
+
+# Go
+core/bin/
+core/tmp/
+
+# Python
+processing/python/.venv/
+processing/python/.pytest_cache/
+processing/python/.mypy_cache/
+processing/python/**/__pycache__/
+processing/python/*.egg-info/
+
+# UI
+ui/node_modules/
+ui/dist/

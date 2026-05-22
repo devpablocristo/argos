@@ -1,0 +1,54 @@
+services:
+  argos-postgres:
+    image: postgis/postgis:16-3.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: argos
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "${ARGOS_POSTGRES_PORT:-15436}:5432"
+    volumes:
+      - argos-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d argos"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  core:
+    build:
+      context: ..
+      dockerfile: argos/Dockerfile.core.dev
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      ARGOS_DATABASE_URL: "postgres://postgres:postgres@argos-postgres:5432/argos?sslmode=disable"
+      ARGOS_STORAGE_DIR: "/data/outputs"
+      ARGOS_PROCESSING_PYTHON: "/opt/argos-processing-venv/bin/python"
+      ARGOS_PROCESSING_PYTHONPATH: "/workspace/argos/processing/python"
+      ARGOS_PROCESSING_TIMEOUT_SEC: "180"
+    volumes:
+      - ..:/workspace
+      - ./sample:/data/sample:ro
+      - argos-outputs:/data/outputs
+    ports:
+      - "${ARGOS_CORE_PORT:-18090}:8080"
+    depends_on:
+      argos-postgres:
+        condition: service_healthy
+
+  ui:
+    build:
+      context: ./ui
+      args:
+        VITE_ARGOS_DEFAULT_SOURCE_URI: "/data/sample"
+    restart: unless-stopped
+    ports:
+      - "${ARGOS_UI_PORT:-13003}:80"
+    depends_on:
+      - core
+
+volumes:
+  argos-postgres-data:
+  argos-outputs:

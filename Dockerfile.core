@@ -1,0 +1,27 @@
+FROM golang:1.26-bookworm AS build
+
+WORKDIR /src
+COPY platform ./platform
+COPY argos ./argos
+WORKDIR /src/argos/core
+RUN go mod download
+RUN CGO_ENABLED=0 go build -o /out/argos-core ./cmd/api
+
+FROM python:3.12-slim
+
+WORKDIR /app
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /out/argos-core /usr/local/bin/argos-core
+COPY argos/processing/python /app/processing/python
+COPY argos/core/migrations /app/migrations
+RUN pip install --no-cache-dir /app/processing/python
+
+ENV PORT=8080
+ENV ARGOS_STORAGE_DIR=/data/outputs
+ENV ARGOS_PROCESSING_PYTHON=python
+ENV ARGOS_PROCESSING_PYTHONPATH=/app/processing/python
+
+CMD ["argos-core"]

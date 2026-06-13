@@ -6,8 +6,10 @@ import (
 	"time"
 
 	"github.com/devpablocristo/argos/core/internal/analyses"
+	"github.com/devpablocristo/argos/core/internal/axis"
 	"github.com/devpablocristo/argos/core/internal/catalog"
 	"github.com/devpablocristo/argos/core/internal/database"
+	"github.com/devpablocristo/argos/core/internal/fields"
 	"github.com/devpablocristo/argos/core/internal/processor"
 )
 
@@ -17,12 +19,19 @@ type Config struct {
 	ProcessingPython     string
 	ProcessingPythonPath string
 	ProcessingTimeoutSec int
+	OrgID                string
+	NexusBaseURL         string
+	NexusAPIKey          string
+	CompanionBaseURL     string
+	CompanionAPIKey      string
+	PublicBaseURL        string
 }
 
 func NewServer(cfg Config) (http.Handler, func(), error) {
 	cleanup := func() {}
 	var catalogRepo catalog.Repository
 	var analysisRepo analyses.Repository
+	var fieldsRepo fields.Repository
 	if cfg.DatabaseURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -36,10 +45,12 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		}
 		catalogRepo = catalog.NewSQLRepository(db)
 		analysisRepo = analyses.NewSQLRepository(db)
+		fieldsRepo = fields.NewSQLRepository(db)
 		cleanup = func() { _ = db.Close() }
 	} else {
 		catalogRepo = catalog.NewMemoryRepository()
 		analysisRepo = analyses.NewMemoryRepository()
+		fieldsRepo = fields.NewMemoryRepository()
 	}
 	processingWorker := processor.NewCLIProcessor(processor.CLIConfig{
 		Python:     cfg.ProcessingPython,
@@ -47,14 +58,25 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 		Timeout:    durationSeconds(cfg.ProcessingTimeoutSec),
 	})
 
-	catalogUC := catalog.NewUsecases(catalogRepo, processingWorker, cfg.StorageDir)
-	analysisUC := analyses.NewUsecases(analysisRepo, catalogUC)
+	fieldsUC := fields.NewUsecases(fieldsRepo)
+	catalogUC := catalog.NewUsecases(catalogRepo, processingWorker, cfg.StorageDir, fieldsUC)
+	axisClient := axis.NewClient(axis.Config{
+		OrgID:            cfg.OrgID,
+		NexusBaseURL:     cfg.NexusBaseURL,
+		NexusAPIKey:      cfg.NexusAPIKey,
+		CompanionBaseURL: cfg.CompanionBaseURL,
+		CompanionAPIKey:  cfg.CompanionAPIKey,
+		PublicBaseURL:    cfg.PublicBaseURL,
+	})
+	analysisUC := analyses.NewUsecases(analysisRepo, catalogUC, axisClient)
 
 	catalogHandler := catalog.NewHandler(catalogUC)
+	fieldsHandler := fields.NewHandler(fieldsUC)
 	analysisHandler := analyses.NewHandler(analysisUC)
 
 	mux := http.NewServeMux()
 	registerHealthEndpoints(mux)
+	fieldsHandler.Register(mux)
 	catalogHandler.Register(mux)
 	analysisHandler.Register(mux)
 

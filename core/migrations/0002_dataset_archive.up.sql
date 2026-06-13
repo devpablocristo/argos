@@ -1,0 +1,3 @@
+ALTER TABLE datasets
+    ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+

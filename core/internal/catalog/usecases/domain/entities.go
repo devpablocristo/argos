@@ -3,13 +3,43 @@ package domain
 import "time"
 
 type Dataset struct {
-	ID        string    `json:"id"`
-	OrgID     string    `json:"org_id,omitempty"`
-	Name      string    `json:"name"`
-	SourceURI string    `json:"source_uri"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID             string                 `json:"id"`
+	OrgID          string                 `json:"org_id,omitempty"`
+	Name           string                 `json:"name"`
+	SourceURI      string                 `json:"source_uri"`
+	Status         string                 `json:"status"`
+	FieldID        *string                `json:"field_id,omitempty"`
+	Classification *DatasetClassification `json:"classification,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
+	ArchivedAt     *time.Time             `json:"archived_at,omitempty"`
+}
+
+type DatasetClassification struct {
+	DatasetID       string    `json:"dataset_id"`
+	DatasetName     string    `json:"dataset_name"`
+	DatasetType     string    `json:"dataset_type"`
+	Scope           string    `json:"scope"`
+	FieldID         *string   `json:"field_id"`
+	LotID           *string   `json:"lot_id"`
+	CampaignID      *string   `json:"campaign_id"`
+	FlightID        *string   `json:"flight_id"`
+	CaptureIDs      []string  `json:"capture_ids"`
+	AnalysisIDs     []string  `json:"analysis_ids"`
+	Confidence      float64   `json:"confidence"`
+	MissingMetadata []string  `json:"missing_metadata"`
+	Reason          string    `json:"reason"`
+	ClassifiedAt    time.Time `json:"classified_at"`
+}
+
+type DatasetEvent struct {
+	EventID   string         `json:"event_id"`
+	DatasetID string         `json:"dataset_id"`
+	EventType string         `json:"event_type"`
+	Timestamp time.Time      `json:"timestamp"`
+	Status    string         `json:"status"`
+	Message   string         `json:"message"`
+	Details   map[string]any `json:"details"`
 }
 
 type Capture struct {

@@ -26,42 +26,81 @@ func NewSQLRepository(db *sql.DB) *SQLRepository {
 	return &SQLRepository{db: db}
 }
 
-func (r *SQLRepository) CreateDataset(ctx context.Context, name, sourceURI string) (catalogdomain.Dataset, error) {
+func (r *SQLRepository) CreateDataset(ctx context.Context, name, sourceURI string, fieldID *string) (catalogdomain.Dataset, error) {
 	ds := catalogdomain.Dataset{
 		ID:        uuid.NewString(),
 		Name:      name,
 		SourceURI: sourceURI,
 		Status:    "registered",
+		FieldID:   cloneStringPtr(fieldID),
 	}
 	err := r.db.QueryRowContext(
 		ctx,
-		`INSERT INTO datasets (id, name, source_uri, status)
-		 VALUES ($1, $2, $3, $4)
+		`INSERT INTO datasets (id, name, source_uri, status, field_id)
+		 VALUES ($1, $2, $3, $4, $5)
 		 RETURNING created_at, updated_at`,
 		ds.ID,
 		ds.Name,
 		ds.SourceURI,
 		ds.Status,
+		stringPtrAsNil(ds.FieldID),
 	).Scan(&ds.CreatedAt, &ds.UpdatedAt)
-	return ds, err
+	if err != nil {
+		return catalogdomain.Dataset{}, err
+	}
+	return ds, nil
 }
 
-func (r *SQLRepository) ListDatasets(ctx context.Context) ([]catalogdomain.Dataset, error) {
+func (r *SQLRepository) ListDatasets(ctx context.Context, includeArchived bool) ([]catalogdomain.Dataset, error) {
 	rows, err := r.db.QueryContext(
 		ctx,
-		`SELECT id, org_id, name, source_uri, status, created_at, updated_at
+		`SELECT id, org_id, name, source_uri, status, field_id::text, created_at, updated_at, archived_at
 		 FROM datasets
+		 WHERE ($1::boolean OR archived_at IS NULL)
 		 ORDER BY created_at DESC`,
+		includeArchived,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var out []catalogdomain.Dataset
+	out := []catalogdomain.Dataset{}
 	for rows.Next() {
 		ds, err := scanDataset(rows)
 		if err != nil {
+			return nil, err
+		}
+		if err := r.attachClassification(ctx, &ds); err != nil {
+			return nil, err
+		}
+		out = append(out, ds)
+	}
+	return out, rows.Err()
+}
+
+func (r *SQLRepository) ListDatasetsByField(ctx context.Context, fieldID string, includeArchived bool) ([]catalogdomain.Dataset, error) {
+	rows, err := r.db.QueryContext(
+		ctx,
+		`SELECT id, org_id, name, source_uri, status, field_id::text, created_at, updated_at, archived_at
+		 FROM datasets
+		 WHERE field_id = $1 AND ($2::boolean OR archived_at IS NULL)
+		 ORDER BY created_at DESC`,
+		fieldID,
+		includeArchived,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []catalogdomain.Dataset{}
+	for rows.Next() {
+		ds, err := scanDataset(rows)
+		if err != nil {
+			return nil, err
+		}
+		if err := r.attachClassification(ctx, &ds); err != nil {
 			return nil, err
 		}
 		out = append(out, ds)
@@ -72,7 +111,7 @@ func (r *SQLRepository) ListDatasets(ctx context.Context) ([]catalogdomain.Datas
 func (r *SQLRepository) GetDataset(ctx context.Context, id string) (catalogdomain.Dataset, error) {
 	ds, err := scanDataset(r.db.QueryRowContext(
 		ctx,
-		`SELECT id, org_id, name, source_uri, status, created_at, updated_at
+		`SELECT id, org_id, name, source_uri, status, field_id::text, created_at, updated_at, archived_at
 		 FROM datasets
 		 WHERE id = $1`,
 		id,
@@ -80,7 +119,58 @@ func (r *SQLRepository) GetDataset(ctx context.Context, id string) (catalogdomai
 	if errors.Is(err, sql.ErrNoRows) {
 		return catalogdomain.Dataset{}, ErrNotFound
 	}
-	return ds, err
+	if err != nil {
+		return catalogdomain.Dataset{}, err
+	}
+	if err := r.attachClassification(ctx, &ds); err != nil {
+		return catalogdomain.Dataset{}, err
+	}
+	return ds, nil
+}
+
+func (r *SQLRepository) UpdateDataset(ctx context.Context, id, name, sourceURI string) (catalogdomain.Dataset, error) {
+	ds, err := scanDataset(r.db.QueryRowContext(
+		ctx,
+		`UPDATE datasets
+		 SET name = $2, source_uri = $3, updated_at = now()
+		 WHERE id = $1
+		 RETURNING id, org_id, name, source_uri, status, field_id::text, created_at, updated_at, archived_at`,
+		id,
+		name,
+		sourceURI,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return catalogdomain.Dataset{}, ErrNotFound
+	}
+	if err != nil {
+		return catalogdomain.Dataset{}, err
+	}
+	if err := r.attachClassification(ctx, &ds); err != nil {
+		return catalogdomain.Dataset{}, err
+	}
+	return ds, nil
+}
+
+func (r *SQLRepository) UpdateDatasetField(ctx context.Context, id string, fieldID *string) (catalogdomain.Dataset, error) {
+	ds, err := scanDataset(r.db.QueryRowContext(
+		ctx,
+		`UPDATE datasets
+		 SET field_id = $2, updated_at = now()
+		 WHERE id = $1
+		 RETURNING id, org_id, name, source_uri, status, field_id::text, created_at, updated_at, archived_at`,
+		id,
+		stringPtrAsNil(fieldID),
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return catalogdomain.Dataset{}, ErrNotFound
+	}
+	if err != nil {
+		return catalogdomain.Dataset{}, err
+	}
+	if err := r.attachClassification(ctx, &ds); err != nil {
+		return catalogdomain.Dataset{}, err
+	}
+	return ds, nil
 }
 
 func (r *SQLRepository) UpdateDatasetStatus(ctx context.Context, id, status string) error {
@@ -101,6 +191,240 @@ func (r *SQLRepository) UpdateDatasetStatus(ctx context.Context, id, status stri
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (r *SQLRepository) ArchiveDataset(ctx context.Context, id string) (catalogdomain.Dataset, error) {
+	ds, err := scanDataset(r.db.QueryRowContext(
+		ctx,
+		`UPDATE datasets
+		 SET archived_at = COALESCE(archived_at, now()), updated_at = now()
+		 WHERE id = $1
+		 RETURNING id, org_id, name, source_uri, status, field_id::text, created_at, updated_at, archived_at`,
+		id,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return catalogdomain.Dataset{}, ErrNotFound
+	}
+	if err != nil {
+		return catalogdomain.Dataset{}, err
+	}
+	if err := r.attachClassification(ctx, &ds); err != nil {
+		return catalogdomain.Dataset{}, err
+	}
+	return ds, nil
+}
+
+func (r *SQLRepository) RestoreDataset(ctx context.Context, id string) (catalogdomain.Dataset, error) {
+	ds, err := scanDataset(r.db.QueryRowContext(
+		ctx,
+		`UPDATE datasets
+		 SET archived_at = NULL, updated_at = now()
+		 WHERE id = $1
+		 RETURNING id, org_id, name, source_uri, status, field_id::text, created_at, updated_at, archived_at`,
+		id,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return catalogdomain.Dataset{}, ErrNotFound
+	}
+	if err != nil {
+		return catalogdomain.Dataset{}, err
+	}
+	if err := r.attachClassification(ctx, &ds); err != nil {
+		return catalogdomain.Dataset{}, err
+	}
+	return ds, nil
+}
+
+func (r *SQLRepository) DeleteDataset(ctx context.Context, id string) (catalogdomain.Dataset, error) {
+	ds, err := scanDataset(r.db.QueryRowContext(
+		ctx,
+		`DELETE FROM datasets
+		 WHERE id = $1
+		 RETURNING id, org_id, name, source_uri, status, field_id::text, created_at, updated_at, archived_at`,
+		id,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return catalogdomain.Dataset{}, ErrNotFound
+	}
+	return ds, err
+}
+
+func (r *SQLRepository) UpsertDatasetClassification(ctx context.Context, classification catalogdomain.DatasetClassification) error {
+	missingMetadataJSON, err := marshalJSONArray(classification.MissingMetadata)
+	if err != nil {
+		return err
+	}
+	result, err := r.db.ExecContext(
+		ctx,
+		`INSERT INTO dataset_classifications (
+			dataset_id, dataset_name, dataset_type, scope, field_id, lot_id,
+			campaign_id, flight_id, confidence, missing_metadata_json, reason, classified_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		ON CONFLICT (dataset_id) DO UPDATE SET
+			dataset_name = EXCLUDED.dataset_name,
+			dataset_type = EXCLUDED.dataset_type,
+			scope = EXCLUDED.scope,
+			field_id = EXCLUDED.field_id,
+			lot_id = EXCLUDED.lot_id,
+			campaign_id = EXCLUDED.campaign_id,
+			flight_id = EXCLUDED.flight_id,
+			confidence = EXCLUDED.confidence,
+			missing_metadata_json = EXCLUDED.missing_metadata_json,
+			reason = EXCLUDED.reason,
+			classified_at = EXCLUDED.classified_at`,
+		classification.DatasetID,
+		classification.DatasetName,
+		classification.DatasetType,
+		classification.Scope,
+		stringPtrAsNil(classification.FieldID),
+		stringPtrAsNil(classification.LotID),
+		stringPtrAsNil(classification.CampaignID),
+		stringPtrAsNil(classification.FlightID),
+		classification.Confidence,
+		missingMetadataJSON,
+		classification.Reason,
+		classification.ClassifiedAt,
+	)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *SQLRepository) GetDatasetClassification(ctx context.Context, datasetID string) (catalogdomain.DatasetClassification, error) {
+	var classification catalogdomain.DatasetClassification
+	var fieldID sql.NullString
+	var lotID sql.NullString
+	var campaignID sql.NullString
+	var flightID sql.NullString
+	var missingMetadataBytes []byte
+	err := r.db.QueryRowContext(
+		ctx,
+		`SELECT
+			dataset_id::text, dataset_name, dataset_type, scope,
+			field_id::text, lot_id::text, campaign_id::text, flight_id::text,
+			confidence, missing_metadata_json, reason, classified_at
+		 FROM dataset_classifications
+		 WHERE dataset_id = $1`,
+		datasetID,
+	).Scan(
+		&classification.DatasetID,
+		&classification.DatasetName,
+		&classification.DatasetType,
+		&classification.Scope,
+		&fieldID,
+		&lotID,
+		&campaignID,
+		&flightID,
+		&classification.Confidence,
+		&missingMetadataBytes,
+		&classification.Reason,
+		&classification.ClassifiedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return catalogdomain.DatasetClassification{}, ErrNotFound
+	}
+	if err != nil {
+		return catalogdomain.DatasetClassification{}, err
+	}
+	classification.FieldID = nullStringPtr(fieldID)
+	classification.LotID = nullStringPtr(lotID)
+	classification.CampaignID = nullStringPtr(campaignID)
+	classification.FlightID = nullStringPtr(flightID)
+	if err := json.Unmarshal(missingMetadataBytes, &classification.MissingMetadata); err != nil {
+		return catalogdomain.DatasetClassification{}, err
+	}
+	captureIDs, err := r.listDatasetCaptureIDs(ctx, datasetID)
+	if err != nil {
+		return catalogdomain.DatasetClassification{}, err
+	}
+	analysisIDs, err := r.listDatasetAnalysisIDs(ctx, datasetID)
+	if err != nil {
+		return catalogdomain.DatasetClassification{}, err
+	}
+	classification.CaptureIDs = captureIDs
+	classification.AnalysisIDs = analysisIDs
+	return classification, nil
+}
+
+func (r *SQLRepository) AppendDatasetEvent(ctx context.Context, event catalogdomain.DatasetEvent) error {
+	detailsJSON, err := marshalJSON(event.Details)
+	if err != nil {
+		return err
+	}
+	result, err := r.db.ExecContext(
+		ctx,
+		`INSERT INTO dataset_events (
+			event_id, dataset_id, event_type, status, message, details_json, created_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		event.EventID,
+		event.DatasetID,
+		event.EventType,
+		event.Status,
+		event.Message,
+		detailsJSON,
+		event.Timestamp,
+	)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *SQLRepository) ListDatasetEvents(ctx context.Context, datasetID string) ([]catalogdomain.DatasetEvent, error) {
+	if _, err := r.GetDataset(ctx, datasetID); err != nil {
+		return nil, err
+	}
+	rows, err := r.db.QueryContext(
+		ctx,
+		`SELECT event_id::text, dataset_id::text, event_type, created_at, status, message, details_json
+		 FROM dataset_events
+		 WHERE dataset_id = $1
+		 ORDER BY created_at`,
+		datasetID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []catalogdomain.DatasetEvent{}
+	for rows.Next() {
+		var event catalogdomain.DatasetEvent
+		var detailsBytes []byte
+		if err := rows.Scan(
+			&event.EventID,
+			&event.DatasetID,
+			&event.EventType,
+			&event.Timestamp,
+			&event.Status,
+			&event.Message,
+			&detailsBytes,
+		); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSON(detailsBytes, &event.Details); err != nil {
+			return nil, err
+		}
+		out = append(out, event)
+	}
+	return out, rows.Err()
 }
 
 func (r *SQLRepository) ReplaceCaptures(ctx context.Context, datasetID string, captures []catalogdomain.Capture) error {
@@ -213,7 +537,7 @@ func (r *SQLRepository) ListCaptures(ctx context.Context, datasetID string) ([]c
 	}
 	defer rows.Close()
 
-	var out []catalogdomain.Capture
+	out := []catalogdomain.Capture{}
 	for rows.Next() {
 		capture, err := r.scanCapture(ctx, rows)
 		if err != nil {
@@ -310,7 +634,7 @@ func (r *SQLRepository) listAssets(ctx context.Context, captureID string) ([]cat
 	}
 	defer rows.Close()
 
-	var out []catalogdomain.BandAsset
+	out := []catalogdomain.BandAsset{}
 	for rows.Next() {
 		var asset catalogdomain.BandAsset
 		var metadataBytes []byte
@@ -355,8 +679,74 @@ type rowScanner interface {
 
 func scanDataset(row rowScanner) (catalogdomain.Dataset, error) {
 	var ds catalogdomain.Dataset
-	err := row.Scan(&ds.ID, &ds.OrgID, &ds.Name, &ds.SourceURI, &ds.Status, &ds.CreatedAt, &ds.UpdatedAt)
+	var archivedAt sql.NullTime
+	var fieldID sql.NullString
+	err := row.Scan(&ds.ID, &ds.OrgID, &ds.Name, &ds.SourceURI, &ds.Status, &fieldID, &ds.CreatedAt, &ds.UpdatedAt, &archivedAt)
+	ds.FieldID = nullStringPtr(fieldID)
+	if archivedAt.Valid {
+		ds.ArchivedAt = &archivedAt.Time
+	}
 	return ds, err
+}
+
+func (r *SQLRepository) attachClassification(ctx context.Context, ds *catalogdomain.Dataset) error {
+	classification, err := r.GetDatasetClassification(ctx, ds.ID)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	ds.Classification = &classification
+	return nil
+}
+
+func (r *SQLRepository) listDatasetCaptureIDs(ctx context.Context, datasetID string) ([]string, error) {
+	rows, err := r.db.QueryContext(
+		ctx,
+		`SELECT id::text
+		 FROM captures
+		 WHERE dataset_id = $1
+		 ORDER BY capture_key`,
+		datasetID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (r *SQLRepository) listDatasetAnalysisIDs(ctx context.Context, datasetID string) ([]string, error) {
+	rows, err := r.db.QueryContext(
+		ctx,
+		`SELECT id::text
+		 FROM analyses
+		 WHERE dataset_id = $1
+		 ORDER BY created_at`,
+		datasetID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func parseCapturedAt(value string) any {
@@ -377,9 +767,30 @@ func marshalJSON(value any) ([]byte, error) {
 	return json.Marshal(value)
 }
 
+func marshalJSONArray(value any) ([]byte, error) {
+	if value == nil {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(value)
+}
+
 func unmarshalJSON(data []byte, dst any) error {
 	if len(data) == 0 {
 		data = []byte("{}")
 	}
 	return json.Unmarshal(data, dst)
+}
+
+func stringPtrAsNil(value *string) any {
+	if value == nil || *value == "" {
+		return nil
+	}
+	return *value
+}
+
+func nullStringPtr(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
 }

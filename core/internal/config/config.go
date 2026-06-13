@@ -14,6 +14,12 @@ type Config struct {
 	ProcessingPython     string
 	ProcessingPythonPath string
 	ProcessingTimeout    time.Duration
+	OrgID                string
+	NexusBaseURL         string
+	NexusAPIKey          string
+	CompanionBaseURL     string
+	CompanionAPIKey      string
+	PublicBaseURL        string
 }
 
 func Load() Config {
@@ -24,6 +30,12 @@ func Load() Config {
 		ProcessingPython:     envconfig.Get("ARGOS_PROCESSING_PYTHON", defaultPython()),
 		ProcessingPythonPath: envconfig.Get("ARGOS_PROCESSING_PYTHONPATH", "../processing/python"),
 		ProcessingTimeout:    envconfig.Duration("ARGOS_PROCESSING_TIMEOUT_SEC", 120*time.Second),
+		OrgID:                envconfig.Get("ARGOS_ORG_ID", "argos-local-org"),
+		NexusBaseURL:         envconfig.Get("ARGOS_NEXUS_BASE_URL", ""),
+		NexusAPIKey:          envconfig.Get("ARGOS_NEXUS_API_KEY", ""),
+		CompanionBaseURL:     envconfig.Get("ARGOS_COMPANION_BASE_URL", ""),
+		CompanionAPIKey:      envconfig.Get("ARGOS_COMPANION_API_KEY", ""),
+		PublicBaseURL:        envconfig.Get("ARGOS_PUBLIC_BASE_URL", ""),
 	}
 }
 

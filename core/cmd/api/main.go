@@ -21,6 +21,12 @@ func main() {
 		ProcessingPython:     cfg.ProcessingPython,
 		ProcessingPythonPath: cfg.ProcessingPythonPath,
 		ProcessingTimeoutSec: int(cfg.ProcessingTimeout.Seconds()),
+		OrgID:                cfg.OrgID,
+		NexusBaseURL:         cfg.NexusBaseURL,
+		NexusAPIKey:          cfg.NexusAPIKey,
+		CompanionBaseURL:     cfg.CompanionBaseURL,
+		CompanionAPIKey:      cfg.CompanionAPIKey,
+		PublicBaseURL:        cfg.PublicBaseURL,
 	})
 	if err != nil {
 		slog.Error("startup failed", "error", err)

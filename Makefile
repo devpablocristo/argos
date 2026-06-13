@@ -4,7 +4,7 @@ GO_BIN_DIR := $(shell go env GOPATH)/bin
 endif
 AIR_BIN := $(GO_BIN_DIR)/air
 
-.PHONY: processing-install processing-test core-test ui-build test run-core run-core-dev run-ui process-sample air-install up down
+.PHONY: processing-install processing-test core-test ui-build test run-core run-core-dev run-ui process-sample air-install network up down seed-nexus-rules seed-companion-assist
 
 processing-install:
 	cd processing/python && \
@@ -38,8 +38,17 @@ run-core-dev:
 run-ui:
 	cd ui && npm run dev
 
-up:
+network:
+	@docker network inspect axis-local >/dev/null 2>&1 || docker network create axis-local >/dev/null
+
+up: network
 	docker compose up --build -d
 
 down:
 	docker compose down
+
+seed-nexus-rules:
+	bash scripts/seed-nexus-rules.sh
+
+seed-companion-assist:
+	bash scripts/seed-companion-assist.sh

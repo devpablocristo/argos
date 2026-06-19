@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { ChatWorkspace, type ChatAdapter, type ChatConversationDetail, type ChatConversationSummary, type ChatMessage, type ChatRequest, type ChatResponse } from '@devpablocristo/platform-chat-ui';
+import '@devpablocristo/platform-chat-ui/styles.css';
 import './styles.css';
 
 const apiBase = import.meta.env.VITE_ARGOS_API_URL ?? 'http://localhost:18090';
@@ -74,6 +76,11 @@ const translations = {
     findings: 'Hallazgos',
     noFindings: 'Sin hallazgos para este analisis.',
     assistedInterpretation: 'Interpretacion asistida',
+    analysisChat: 'Chat de analisis',
+    analysisChatLead: 'Consulta este analisis con contexto del campo, dataset y captura seleccionada.',
+    analysisChatPlaceholder: 'Pregunta sobre el analisis seleccionado...',
+    analysisChatSend: 'Enviar',
+    analysisChatNew: 'Nuevo',
     noInterpretation: 'Sin interpretacion asistida todavia.',
     unavailable: 'No disponible',
     syncStatuses: {
@@ -208,6 +215,11 @@ const translations = {
     findings: 'Findings',
     noFindings: 'No findings for this analysis.',
     assistedInterpretation: 'Assisted interpretation',
+    analysisChat: 'Analysis chat',
+    analysisChatLead: 'Ask about this analysis with context from the selected field, dataset and capture.',
+    analysisChatPlaceholder: 'Ask about the selected analysis...',
+    analysisChatSend: 'Send',
+    analysisChatNew: 'New',
     noInterpretation: 'No assisted interpretation yet.',
     unavailable: 'Unavailable',
     syncStatuses: {
@@ -407,6 +419,88 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
+const argosChatAdapter: ChatAdapter = {
+  async sendMessage(input: ChatRequest): Promise<ChatResponse> {
+    const raw = await request<Record<string, unknown>>('/v1/chat', {
+      method: 'POST',
+      body: JSON.stringify({
+        message: input.message,
+        chat_id: input.chatId,
+        task_id: input.taskId,
+        agent_id: input.agentId,
+        product_surface: input.productSurface ?? 'argos',
+        route_hint: input.routeHint,
+        confirmed_actions: input.confirmedActions,
+        workspace: input.workspace,
+      }),
+    });
+    return mapChatResponse(raw);
+  },
+  async listConversations(limit = 20): Promise<{ items: ChatConversationSummary[] }> {
+    const raw = await request<{ items?: Array<Record<string, unknown>> }>(`/v1/chat/conversations?limit=${encodeURIComponent(String(limit))}`);
+    return { items: (raw.items ?? []).map(mapConversationSummary) };
+  },
+  async getConversation(id: string): Promise<ChatConversationDetail> {
+    const raw = await request<Record<string, unknown>>(`/v1/chat/conversations/${encodeURIComponent(id)}`);
+    return mapConversationDetail(raw);
+  },
+};
+
+function mapChatResponse(raw: Record<string, unknown>): ChatResponse {
+  return {
+    chatId: stringValue(raw.chat_id) || stringValue(raw.chatId),
+    taskId: stringValue(raw.task_id) || stringValue(raw.taskId),
+    runId: stringValue(raw.run_id) || stringValue(raw.runId),
+    agentId: stringValue(raw.agent_id) || stringValue(raw.agentId),
+    reply: stringValue(raw.reply),
+    blocks: arrayValue(raw.blocks),
+    toolCalls: arrayValue(raw.tool_calls) || arrayValue(raw.toolCalls),
+    pendingConfirmations: arrayValue(raw.pending_confirmations) || arrayValue(raw.pendingConfirmations),
+    messages: Array.isArray(raw.messages) ? raw.messages.map((item) => mapChatMessage(asRecord(item))).filter(Boolean) : undefined,
+  };
+}
+
+function mapConversationSummary(raw: Record<string, unknown>): ChatConversationSummary {
+  return {
+    id: stringValue(raw.id),
+    title: stringValue(raw.title),
+    updatedAt: stringValue(raw.updated_at) || stringValue(raw.updatedAt),
+    createdAt: stringValue(raw.created_at) || stringValue(raw.createdAt),
+  };
+}
+
+function mapConversationDetail(raw: Record<string, unknown>): ChatConversationDetail {
+  return {
+    id: stringValue(raw.id),
+    title: stringValue(raw.title),
+    updatedAt: stringValue(raw.updated_at) || stringValue(raw.updatedAt),
+    createdAt: stringValue(raw.created_at) || stringValue(raw.createdAt),
+    messages: Array.isArray(raw.messages) ? raw.messages.map((item) => mapChatMessage(asRecord(item))).filter(Boolean) : [],
+  };
+}
+
+function mapChatMessage(raw: Record<string, unknown>): ChatMessage {
+  return {
+    id: stringValue(raw.id),
+    role: stringValue(raw.role) || 'assistant',
+    content: stringValue(raw.content),
+    timestamp: stringValue(raw.timestamp) || stringValue(raw.created_at) || stringValue(raw.createdAt),
+    metadata: asRecord(raw.metadata),
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function arrayValue(value: unknown): unknown[] | undefined {
+  return Array.isArray(value) ? value : undefined;
+}
+
 async function requestForm<T>(path: string, body: FormData): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     method: 'POST',
@@ -477,6 +571,31 @@ function App() {
   const rgbPreview = selectedCaptureID ? `${apiBase}/v1/captures/${selectedCaptureID}/assets/rgb` : '';
   const activePreview = imageMode === 'rgb' ? rgbPreview : ndviPreview;
   const outputs = useMemo(() => analysis?.outputs ?? [], [analysis]);
+  const chatWorkspace = useMemo(
+    () => ({
+      field: field ? { id: field.id, name: field.name } : null,
+      dataset: dataset
+        ? {
+            id: dataset.id,
+            name: dataset.name,
+            status: dataset.status,
+            classification: datasetClassification,
+          }
+        : null,
+      capture: selectedCaptureID ? { id: selectedCaptureID } : null,
+      analysis: analysis
+        ? {
+            id: analysis.id,
+            kind: analysis.kind,
+            status: analysis.status,
+            metrics: analysis.metrics,
+            companion_output: analysis.companion_output,
+            findings_count: analysis.nexus_findings?.length ?? 0,
+          }
+        : null,
+    }),
+    [analysis, dataset, datasetClassification, field, selectedCaptureID],
+  );
   const visibleDatasets = useMemo(
     () => datasets.filter((item) => (showArchived ? Boolean(item.archived_at) : !item.archived_at)),
     [datasets, showArchived],
@@ -1344,6 +1463,27 @@ function App() {
                 ) : (
                   <p className="muted">{analysis.companion_sync_status === 'synced' ? t.noInterpretation : t.unavailable}</p>
                 )}
+              </section>
+
+              <section className="insight-panel argos-chat-panel">
+                <ChatWorkspace
+                  adapter={argosChatAdapter}
+                  showConversations={false}
+                  baseRequest={{
+                    productSurface: 'argos',
+                    routeHint: 'analysis_context',
+                    workspace: chatWorkspace,
+                  }}
+                  labels={{
+                    title: t.analysisChat,
+                    lead: t.analysisChatLead,
+                    emptyThread: t.analysisChatLead,
+                    inputPlaceholder: t.analysisChatPlaceholder,
+                    send: t.analysisChatSend,
+                    sending: t.processing,
+                    newConversation: t.analysisChatNew,
+                  }}
+                />
               </section>
             </div>
           </>

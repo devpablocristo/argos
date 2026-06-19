@@ -8,6 +8,7 @@ import (
 	"github.com/devpablocristo/argos/core/internal/analyses"
 	"github.com/devpablocristo/argos/core/internal/axis"
 	"github.com/devpablocristo/argos/core/internal/catalog"
+	"github.com/devpablocristo/argos/core/internal/chat"
 	"github.com/devpablocristo/argos/core/internal/database"
 	"github.com/devpablocristo/argos/core/internal/fields"
 	"github.com/devpablocristo/argos/core/internal/processor"
@@ -73,12 +74,14 @@ func NewServer(cfg Config) (http.Handler, func(), error) {
 	catalogHandler := catalog.NewHandler(catalogUC)
 	fieldsHandler := fields.NewHandler(fieldsUC)
 	analysisHandler := analyses.NewHandler(analysisUC)
+	chatHandler := chat.NewHandler(axisClient)
 
 	mux := http.NewServeMux()
 	registerHealthEndpoints(mux)
 	fieldsHandler.Register(mux)
 	catalogHandler.Register(mux)
 	analysisHandler.Register(mux)
+	chatHandler.Register(mux)
 
 	return withCORS(mux), cleanup, nil
 }

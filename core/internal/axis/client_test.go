@@ -47,3 +47,39 @@ func TestClientRunAssistRequiresConfiguration(t *testing.T) {
 		t.Fatalf("expected ErrNotConfigured, got %v", err)
 	}
 }
+
+func TestClientChatSendsArgosProductContext(t *testing.T) {
+	var gotOrg string
+	var gotProduct string
+	var gotBody ChatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotOrg = r.Header.Get("X-Org-ID")
+		gotProduct = r.Header.Get("X-Product-Surface")
+		if r.URL.Path != "/v1/chat" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(ChatResponse{ChatID: "chat-1", Reply: "ok"})
+	}))
+	defer server.Close()
+
+	client := NewClient(Config{OrgID: "argos-local-org", CompanionBaseURL: server.URL, CompanionAPIKey: "secret"})
+	out, err := client.Chat(context.Background(), ChatRequest{Message: "explain"})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if out.ChatID != "chat-1" || out.Reply != "ok" {
+		t.Fatalf("unexpected response: %+v", out)
+	}
+	if gotOrg != "argos-local-org" {
+		t.Fatalf("org header mismatch: %q", gotOrg)
+	}
+	if gotProduct != "argos" {
+		t.Fatalf("product header mismatch: %q", gotProduct)
+	}
+	if gotBody.ProductSurface != "argos" {
+		t.Fatalf("product body mismatch: %q", gotBody.ProductSurface)
+	}
+}

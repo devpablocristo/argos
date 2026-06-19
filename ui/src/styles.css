@@ -686,6 +686,27 @@ dd {
   white-space: pre-line;
 }
 
+.argos-chat-panel {
+  grid-column: 1 / -1;
+  padding: 0;
+  overflow: hidden;
+}
+
+.argos-chat-panel .m-chat-workspace {
+  border: 0;
+  border-radius: 0;
+  background: #ffffff;
+}
+
+.argos-chat-panel .m-chat-workspace__header,
+.argos-chat-panel .m-chat-workspace__body {
+  padding: 12px;
+}
+
+.argos-chat-panel .m-chat-thread {
+  max-height: 320px;
+}
+
 .outputs a {
   border: 1px solid #d2d8cf;
   border-radius: 999px;

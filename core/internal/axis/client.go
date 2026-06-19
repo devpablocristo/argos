@@ -82,6 +82,56 @@ type AssistRunResponse struct {
 	Created string         `json:"created_at"`
 }
 
+type ChatRequest struct {
+	Message          string         `json:"message"`
+	ChatID           string         `json:"chat_id,omitempty"`
+	TaskID           string         `json:"task_id,omitempty"`
+	AgentID          string         `json:"agent_id,omitempty"`
+	ProductSurface   string         `json:"product_surface,omitempty"`
+	RouteHint        string         `json:"route_hint,omitempty"`
+	ConfirmedActions []string       `json:"confirmed_actions,omitempty"`
+	Workspace        map[string]any `json:"workspace,omitempty"`
+}
+
+type ChatResponse struct {
+	ChatID               string        `json:"chat_id,omitempty"`
+	TaskID               string        `json:"task_id,omitempty"`
+	RunID                string        `json:"run_id,omitempty"`
+	AgentID              string        `json:"agent_id,omitempty"`
+	Reply                string        `json:"reply"`
+	Blocks               []any         `json:"blocks,omitempty"`
+	ToolCalls            []any         `json:"tool_calls,omitempty"`
+	PendingConfirmations []any         `json:"pending_confirmations,omitempty"`
+	Messages             []ChatMessage `json:"messages,omitempty"`
+}
+
+type ChatConversationListResult struct {
+	Items []ChatConversationSummary `json:"items"`
+}
+
+type ChatConversationSummary struct {
+	ID        string `json:"id"`
+	Title     string `json:"title,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+}
+
+type ChatConversationDetail struct {
+	ID        string        `json:"id"`
+	Title     string        `json:"title,omitempty"`
+	Messages  []ChatMessage `json:"messages"`
+	UpdatedAt string        `json:"updated_at,omitempty"`
+	CreatedAt string        `json:"created_at,omitempty"`
+}
+
+type ChatMessage struct {
+	ID        string         `json:"id,omitempty"`
+	Role      string         `json:"role"`
+	Content   string         `json:"content"`
+	CreatedAt string         `json:"created_at,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
+
 func NewClient(cfg Config) *Client {
 	return &Client{
 		httpClient:       &http.Client{Timeout: 20 * time.Second},
@@ -134,6 +184,43 @@ func (c *Client) RunAssist(ctx context.Context, req AssistRunRequest) (AssistRun
 	return out, err
 }
 
+func (c *Client) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
+	if !c.CompanionConfigured() {
+		return ChatResponse{}, ErrNotConfigured
+	}
+	if strings.TrimSpace(req.ProductSurface) == "" {
+		req.ProductSurface = "argos"
+	}
+	var out ChatResponse
+	err := c.postJSON(ctx, c.companionBaseURL, c.companionAPIKey, "/v1/chat", req, &out)
+	return out, err
+}
+
+func (c *Client) ListChatConversations(ctx context.Context, limit int) (ChatConversationListResult, error) {
+	if !c.CompanionConfigured() {
+		return ChatConversationListResult{}, ErrNotConfigured
+	}
+	values := url.Values{}
+	values.Set("product_surface", "argos")
+	if limit > 0 {
+		values.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	var out ChatConversationListResult
+	err := c.getJSON(ctx, c.companionBaseURL, c.companionAPIKey, "/v1/chat/conversations", values, &out)
+	return out, err
+}
+
+func (c *Client) GetChatConversation(ctx context.Context, id string) (ChatConversationDetail, error) {
+	if !c.CompanionConfigured() {
+		return ChatConversationDetail{}, ErrNotConfigured
+	}
+	values := url.Values{}
+	values.Set("product_surface", "argos")
+	var out ChatConversationDetail
+	err := c.getJSON(ctx, c.companionBaseURL, c.companionAPIKey, "/v1/chat/conversations/"+strings.TrimSpace(id), values, &out)
+	return out, err
+}
+
 func (c *Client) postJSON(ctx context.Context, baseURL, apiKey, path string, body any, out any) error {
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -150,6 +237,7 @@ func (c *Client) postJSON(ctx context.Context, baseURL, apiKey, path string, bod
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-API-Key", apiKey)
 	httpReq.Header.Set("X-Org-ID", c.OrgID())
+	httpReq.Header.Set("X-Product-Surface", "argos")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -167,6 +255,40 @@ func (c *Client) postJSON(ctx context.Context, baseURL, apiKey, path string, bod
 		return nil
 	}
 	if len(respBody) == 0 {
+		return nil
+	}
+	return json.Unmarshal(respBody, out)
+}
+
+func (c *Client) getJSON(ctx context.Context, baseURL, apiKey, path string, query url.Values, out any) error {
+	endpoint, err := url.JoinPath(baseURL, path)
+	if err != nil {
+		return err
+	}
+	if len(query) > 0 {
+		endpoint += "?" + query.Encode()
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	httpReq.Header.Set("X-API-Key", apiKey)
+	httpReq.Header.Set("X-Org-ID", c.OrgID())
+	httpReq.Header.Set("X-Product-Surface", "argos")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("axis request failed: status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	if out == nil || len(respBody) == 0 {
 		return nil
 	}
 	return json.Unmarshal(respBody, out)

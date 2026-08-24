@@ -151,3 +151,14 @@ These notes should not be deleted without checking the current code and docs.
 - Updated after adding field CRUD and field-first dataset loading. The old note
   that formal field CRUD did not exist was replaced because `core/internal/fields`
   and migration `0005_fields` now implement it.
+
+<!-- agent-tooling:start -->
+## Flujo de herramientas para agentes
+
+1. Usá codebase-memory como primera opción para descubrir código, dependencias y recorridos.
+2. Usá Structurizr para la arquitectura C4 intencional; el workspace compartido vive en `../architecture/docs/c4/workspace.dsl` y sólo cambia cuando cambian límites de sistema, contenedor o despliegue.
+3. Tratá Grasp como una pista visual no autoritativa y verificá sus hallazgos; para este piloto seguí `docs/tooling/grasp-pilot.md` y nunca uses su nota como gate.
+4. En el workspace principal, usá GitButler para las escrituras de control de versiones. En un linked worktree no ejecutes `but setup`; los commits Git locales están permitidos porque `but commit` no funciona allí.
+
+Las validaciones automáticas aportan evidencia, pero no crean una revisión humana obligatoria. No hagas push ni abras un PR salvo que la tarea lo pida.
+<!-- agent-tooling:end -->

@@ -1,0 +1,4 @@
+[mcp_servers.grasp-argos-pilot]
+url = "http://127.0.0.1:18081/mcp"
+required = false
+startup_timeout_sec = 30

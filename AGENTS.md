@@ -50,5 +50,5 @@ Grasp está habilitado sólo como piloto consultivo de Argos. Sus scores no son 
 
 - Detalle preservado: `docs/agents/repository-context.md`.
 - Piloto Grasp: `docs/tooling/grasp-pilot.md`.
-- C4 compartido: `../architecture/docs/c4/workspace.dsl`; cambiarlo sólo si cambian límites.
+- C4 compartido: `/home/pablocristo/.config/agent-observability/architecture/docs/c4/workspace.dsl`; cambiarlo sólo si cambian límites.
 - Usar Codebase Memory para navegación, Chrome DevTools para UI real y GitButler para escrituras Git.

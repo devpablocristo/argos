@@ -4,7 +4,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/devpablocristo/platform/config/go/envconfig"
+	"github.com/devpablocristo/foundation/platform/config/go/envconfig"
 )
 
 type Config struct {

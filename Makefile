@@ -4,7 +4,7 @@ GO_BIN_DIR := $(shell go env GOPATH)/bin
 endif
 AIR_BIN := $(GO_BIN_DIR)/air
 
-.PHONY: processing-install processing-test core-test ui-build test run-core run-core-dev run-ui process-sample air-install network up down seed-nexus-rules seed-companion-assist
+.PHONY: processing-install processing-test core-test ui-install ui-build test run-core run-core-dev run-ui process-sample air-install network up down seed-nexus-rules seed-companion-assist
 
 processing-install:
 	cd processing/python && \
@@ -20,7 +20,10 @@ processing-test: processing-install
 core-test:
 	cd core && go test ./...
 
-ui-build:
+ui-install:
+	cd ui && npm ci
+
+ui-build: ui-install
 	cd ui && npm run build
 
 test: core-test processing-test ui-build
